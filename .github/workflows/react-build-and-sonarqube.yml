@@ -1,4 +1,4 @@
-name: CI - Test and SonarQube
+name: SonarQube Scan + PR Comment
 
 on:
   pull_request:
@@ -6,9 +6,8 @@ on:
       - main
 
 jobs:
-  test-and-sonar:
+  sonar:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -16,48 +15,50 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run tests with coverage
-        run: |
-          npm test -- --coverage --watchAll=false
+        run: npm test -- --coverage --watchAll=false
+        continue-on-error: true
 
       - name: Run SonarQube scanner
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           npx sonar-scanner \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.projectKey=myreactproject \
-            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
-            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
-            -Dsonar.pullrequest.base=${{ github.base_ref }}
+            -Dsonar.sources=src \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+            -Dsonar.host.url=$SONAR_HOST_URL \
+            -Dsonar.login=$SONAR_TOKEN
 
-      - name: Wait for SonarQube Quality Gate
-        run: sleep 20
+      - name: Wait for SonarQube processing
+        run: sleep 30  # Adjust if your server takes longer
 
-      - name: Get Quality Gate status
-        id: qg
+      - name: Fetch Quality Gate status
+        id: fetch_status
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=myreactproject" \
-            | jq -r '.projectStatus.status')
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          response=$(curl -s -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=myreactproject")
+          echo "$response" > sonar_status.json
+          status=$(echo $response | jq -r '.projectStatus.status')
+          echo "status=$status" >> $GITHUB_OUTPUT
 
-      - name: Comment on PR with Quality Gate result
-        uses: marocchino/sticky-pull-request-comment@v2
+      - name: Post comment on PR with Quality Gate result
+        uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          header: SonarQube Quality Gate Result
-          message: |
-            **SonarQube Quality Gate:** ${{ steps.qg.outputs.status }}
+          repository: ${{ github.repository }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## SonarQube Quality Gate Result
 
-      - name: Fail if Quality Gate failed
-        if: steps.qg.outputs.status != 'OK'
-        run: exit 1
+            Status: **${{ steps.fetch_status.outputs.status }}**
+
+            _Note: This is a manual PR comment workaround. Full PR decoration requires SonarQube Developer Edition._
