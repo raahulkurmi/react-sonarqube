@@ -1,4 +1,4 @@
-name: SonarQube Manual Report to PR
+name: SonarQube PR Analysis
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -25,37 +25,40 @@ jobs:
         run: npm test -- --coverage
         continue-on-error: true
 
-      - name: Run SonarQube analysis
+      - name: Run SonarQube scanner
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           npx sonar-scanner \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.projectKey=myreactproject \
+            -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
-            -Dsonar.projectKey=myreactproject
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-      - name: Wait for SonarQube to process results
-        run: sleep 20
+      - name: Wait for SonarQube to process
+        run: sleep 10
 
-      - name: Fetch SonarQube metrics
+      - name: Fetch metrics from SonarQube
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
             -o sonar_metrics.json
 
           echo "### 📊 SonarQube Quality Report" > sonar_comment.md
-          echo "" >> sonar_comment.md
-          echo "**Project:** \`myreactproject\`" >> sonar_comment.md
-          echo "" >> sonar_comment.md
-          jq -r '.component.measures[] | "- **\(.metric | gsub("_"; " ") | ascii_upcase)**: \(.value)"' sonar_metrics.json >> sonar_comment.md
 
-      - name: Post SonarQube summary to PR
+          if jq -e '.component.measures' sonar_metrics.json > /dev/null; then
+            echo "**Project:** \`myreactproject\`" >> sonar_comment.md
+            jq -r '.component.measures[] | "- **\(.metric | gsub("_"; " ") | ascii_upcase)**: \(.value)"' sonar_metrics.json >> sonar_comment.md
+          else
+            echo "⚠️ Could not retrieve metrics. Check project key/token or SonarQube availability." >> sonar_comment.md
+          fi
+
+      - name: Comment on Pull Request
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GH_COMMENT_TOKEN }}
           issue-number: ${{ github.event.pull_request.number }}
           body-path: sonar_comment.md
