@@ -59,6 +59,6 @@ jobs:
       - name: Comment on Pull Request
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
           issue-number: ${{ github.event.pull_request.number }}
           body-path: sonar_comment.md
