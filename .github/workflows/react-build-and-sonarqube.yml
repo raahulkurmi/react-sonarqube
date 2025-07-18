@@ -1,4 +1,4 @@
-name: SonarQube Analysis and PR Comment
+name: SonarQube Manual Report to PR
 
 on:
   pull_request:
@@ -25,7 +25,7 @@ jobs:
         run: npm test -- --coverage
         continue-on-error: true
 
-      - name: Run SonarQube scanner
+      - name: Run SonarQube analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -35,26 +35,27 @@ jobs:
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.projectKey=myreactproject
 
-      - name: Wait for SonarQube processing
+      - name: Wait for SonarQube to process results
         run: sleep 20
 
-      - name: Fetch SonarQube Quality Gate result
+      - name: Fetch SonarQube metrics
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=myreactproject" \
-            -o sonar_result.json
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
+            -o sonar_metrics.json
 
-      - name: Post Quality Gate result as PR comment
+          echo "### 📊 SonarQube Quality Report" > sonar_comment.md
+          echo "" >> sonar_comment.md
+          echo "**Project:** \`myreactproject\`" >> sonar_comment.md
+          echo "" >> sonar_comment.md
+          jq -r '.component.measures[] | "- **\(.metric | gsub("_"; " ") | ascii_upcase)**: \(.value)"' sonar_metrics.json >> sonar_comment.md
+
+      - name: Post SonarQube summary to PR
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GH_PAT }}
           issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            ## SonarQube Quality Gate Result
-
-            Status: **$(jq -r '.projectStatus.status' sonar_result.json)**
-
-            _Note: Full PR decoration requires SonarQube Developer Edition._
+          body-path: sonar_comment.md
