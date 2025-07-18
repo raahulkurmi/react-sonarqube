@@ -1,0 +1,59 @@
+name: SonarQube Analysis and PR Comment
+
+on:
+  pull_request:
+    branches:
+      - master  # adjust if your default branch is different
+
+jobs:
+  sonar-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm test -- --coverage
+
+      - name: Run SonarQube scanner
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          npx sonar-scanner \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.projectKey=myreactproject \
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
+            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+      - name: Wait for SonarQube processing
+        run: sleep 20
+
+      - name: Fetch SonarQube Quality Gate result
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=myreactproject" \
+            -o sonar_result.json
+
+      - name: Comment Quality Gate result on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: sonar-quality-gate
+          message: |
+            🧪 **SonarQube Quality Gate Result**
+            ```
+            $(jq -r '.projectStatus.status' sonar_result.json)
+            ```
+            🔗 [View full report](${{ secrets.SONAR_HOST_URL }}/dashboard?id=myreactproject)
