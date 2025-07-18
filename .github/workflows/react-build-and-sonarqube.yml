@@ -1,16 +1,16 @@
-name: SonarQube Analysis and PR Comment
+name: CI - Test and SonarQube
 
 on:
   pull_request:
     branches:
-      - master  # adjust if your default branch is different
+      - main
 
 jobs:
-  sonar-analysis:
+  test-and-sonar:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -22,7 +22,8 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        run: npm test -- --coverage
+        run: |
+          npm test -- --coverage --watchAll=false
 
       - name: Run SonarQube scanner
         env:
@@ -36,24 +37,27 @@ jobs:
             -Dsonar.pullrequest.branch=${{ github.head_ref }} \
             -Dsonar.pullrequest.base=${{ github.base_ref }}
 
-      - name: Wait for SonarQube processing
+      - name: Wait for SonarQube Quality Gate
         run: sleep 20
 
-      - name: Fetch SonarQube Quality Gate result
+      - name: Get Quality Gate status
+        id: qg
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+          STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=myreactproject" \
-            -o sonar_result.json
+            | jq -r '.projectStatus.status')
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
 
-      - name: Comment Quality Gate result on PR
+      - name: Comment on PR with Quality Gate result
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: sonar-quality-gate
+          token: ${{ secrets.GITHUB_TOKEN }}
+          header: SonarQube Quality Gate Result
           message: |
-            🧪 **SonarQube Quality Gate Result**
-            ```
-            $(jq -r '.projectStatus.status' sonar_result.json)
-            ```
-            🔗 [View full report](${{ secrets.SONAR_HOST_URL }}/dashboard?id=myreactproject)
+            **SonarQube Quality Gate:** ${{ steps.qg.outputs.status }}
+
+      - name: Fail if Quality Gate failed
+        if: steps.qg.outputs.status != 'OK'
+        run: exit 1
