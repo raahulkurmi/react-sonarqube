@@ -34,10 +34,40 @@ jobs:
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
+            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
 
-      - name: Wait for SonarQube to process
-        run: sleep 10
+      - name: Wait for SonarQube analysis to complete
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          echo "Waiting for SonarQube analysis to complete..."
+          COMPONENT_KEY="myreactproject"
+          ATTEMPTS=0
+          MAX_ATTEMPTS=10
+          SLEEP_SECONDS=10
+
+          TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${COMPONENT_KEY}" | jq -r '.current.id')
+
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+              "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" | jq -r '.task.status')
+
+            echo "SonarQube task status: $STATUS"
+
+            if [ "$STATUS" = "SUCCESS" ]; then
+              break
+            elif [ "$STATUS" = "FAILED" ]; then
+              echo "SonarQube analysis failed."
+              exit 1
+            fi
+
+            sleep $SLEEP_SECONDS
+            ATTEMPTS=$((ATTEMPTS+1))
+          done
 
       - name: Fetch metrics from SonarQube
         env:
