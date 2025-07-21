@@ -70,23 +70,37 @@ jobs:
           done
 
       - name: Fetch metrics from SonarQube
+        id: fetch_metrics
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          echo "Fetching metrics from SonarQube..."
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
             -o sonar_metrics.json
 
           echo "### 📊 SonarQube Quality Report" > sonar_comment.md
+          echo "**Project:** \`myreactproject\`" >> sonar_comment.md
+          echo "" >> sonar_comment.md
 
           if jq -e '.component.measures' sonar_metrics.json > /dev/null; then
-            echo "**Project:** \`myreactproject\`" >> sonar_comment.md
-            jq -r '.component.measures[] | "- **\(.metric | gsub("_"; " ") | ascii_upcase)**: \(.value)"' sonar_metrics.json >> sonar_comment.md
+            jq -r '.component.measures[] | 
+              "- \(.metric | 
+                  if . == \"bugs\" then \"🐞 Bugs\" 
+                  elif . == \"vulnerabilities\" then \"🔐 Vulnerabilities\" 
+                  elif . == \"code_smells\" then \"💨 Code Smells\" 
+                  elif . == \"coverage\" then \"📈 Coverage\" 
+                  elif . == \"duplicated_lines_density\" then \"🧬 Duplicated Lines (%)\" 
+                  elif . == \"reliability_rating\" then \"📊 Reliability Rating\" 
+                  elif . == \"security_rating\" then \"🔒 Security Rating\" 
+                  elif . == \"sqale_rating\" then \"⚙️ Maintainability Rating\" 
+                  else . 
+                end): \(.value)"' sonar_metrics.json >> sonar_comment.md
           else
             echo "⚠️ Could not retrieve metrics. Check project key/token or SonarQube availability." >> sonar_comment.md
           fi
 
-      - name: Comment on Pull Request
+      - name: Comment on Pull Request with SonarQube Results
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GH_PAT }}
