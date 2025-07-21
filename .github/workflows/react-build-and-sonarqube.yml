@@ -1,4 +1,4 @@
-name: SonarQube PR Analysis (Community Edition)
+name: SonarQube Analysis (Community Edition, No Raw Metrics Print)
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  sonar-analysis:
+  sonar:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,7 +25,7 @@ jobs:
         run: npm test -- --coverage
         continue-on-error: true
 
-      - name: Run SonarQube scanner (Community Edition Safe)
+      - name: Run SonarQube Scanner (no PR params)
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -40,14 +40,20 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          echo "Waiting for SonarQube analysis to complete..."
           COMPONENT_KEY="newtest"
           ATTEMPTS=0
-          MAX_ATTEMPTS=10
+          MAX_ATTEMPTS=15
           SLEEP_SECONDS=10
 
           TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${COMPONENT_KEY}" | jq -r '.current.id')
+
+          echo "SonarQube task id: $TASK_ID"
+
+          if [ "$TASK_ID" = "null" ]; then
+            echo "❌ No current SonarQube task found for component $COMPONENT_KEY"
+            exit 1
+          fi
 
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
@@ -56,9 +62,10 @@ jobs:
             echo "SonarQube task status: $STATUS"
 
             if [ "$STATUS" = "SUCCESS" ]; then
+              echo "✅ SonarQube analysis completed successfully"
               break
             elif [ "$STATUS" = "FAILED" ]; then
-              echo "SonarQube analysis failed."
+              echo "❌ SonarQube analysis failed"
               exit 1
             fi
 
@@ -66,36 +73,30 @@ jobs:
             ATTEMPTS=$((ATTEMPTS+1))
           done
 
-      - name: Fetch metrics from SonarQube
+          if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+            echo "❌ Timed out waiting for SonarQube analysis"
+            exit 1
+          fi
+
+      - name: Fetch SonarQube metrics (no raw print)
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=newtest&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=newtest&metricKeys=bugs,vulnerabilities,code_smells,coverage" \
             -o sonar_metrics.json
 
-          echo "### 📊 SonarQube Quality Report" > sonar_comment.md
-          echo "**Project:** \`newtest\`" >> sonar_comment.md
-          echo "" >> sonar_comment.md
+      - name: Create comment body
+        run: |
+          echo "### 📊 SonarQube Quality Report for \`newtest\`" > sonar_comment.md
 
           if jq -e '.component.measures' sonar_metrics.json > /dev/null; then
-            jq -r '.component.measures[] | 
-              "- \(.metric | 
-                  if . == "bugs" then "🐞 Bugs" 
-                  elif . == "vulnerabilities" then "🔐 Vulnerabilities" 
-                  elif . == "code_smells" then "💨 Code Smells" 
-                  elif . == "coverage" then "📈 Coverage" 
-                  elif . == "duplicated_lines_density" then "🧬 Duplicated Lines (%)" 
-                  elif . == "reliability_rating" then "📊 Reliability Rating" 
-                  elif . == "security_rating" then "🔒 Security Rating" 
-                  elif . == "sqale_rating" then "⚙️ Maintainability Rating" 
-                  else . 
-                end): \(.value)"' sonar_metrics.json >> sonar_comment.md
+            jq -r '.component.measures[] | "- \(.metric | ascii_upcase): \(.value)"' sonar_metrics.json >> sonar_comment.md
           else
             echo "⚠️ Could not retrieve metrics. Check project key/token or SonarQube availability." >> sonar_comment.md
           fi
 
-      - name: Comment on Pull Request with SonarQube Results
+      - name: Post comment on PR
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GH_PAT }}
