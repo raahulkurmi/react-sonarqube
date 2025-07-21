@@ -30,7 +30,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           npx sonar-scanner \
-            -Dsonar.projectKey=myreactproject \
+            -Dsonar.projectKey=newtest \
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
@@ -41,7 +41,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           echo "Waiting for SonarQube analysis to complete..."
-          COMPONENT_KEY="myreactproject"
+          COMPONENT_KEY="newtest"
           ATTEMPTS=0
           MAX_ATTEMPTS=10
           SLEEP_SECONDS=10
@@ -71,24 +71,24 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=newtest&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
             -o sonar_metrics.json
 
           echo "### 📊 SonarQube Quality Report" > sonar_comment.md
-          echo "**Project:** \`myreactproject\`" >> sonar_comment.md
+          echo "**Project:** \`newtest\`" >> sonar_comment.md
           echo "" >> sonar_comment.md
 
           if jq -e '.component.measures' sonar_metrics.json > /dev/null; then
             jq -r '.component.measures[] | 
               "- \(.metric | 
-                  if . == \"bugs\" then \"🐞 Bugs\" 
-                  elif . == \"vulnerabilities\" then \"🔐 Vulnerabilities\" 
-                  elif . == \"code_smells\" then \"💨 Code Smells\" 
-                  elif . == \"coverage\" then \"📈 Coverage\" 
-                  elif . == \"duplicated_lines_density\" then \"🧬 Duplicated Lines (%)\" 
-                  elif . == \"reliability_rating\" then \"📊 Reliability Rating\" 
-                  elif . == \"security_rating\" then \"🔒 Security Rating\" 
-                  elif . == \"sqale_rating\" then \"⚙️ Maintainability Rating\" 
+                  if . == "bugs" then "🐞 Bugs" 
+                  elif . == "vulnerabilities" then "🔐 Vulnerabilities" 
+                  elif . == "code_smells" then "💨 Code Smells" 
+                  elif . == "coverage" then "📈 Coverage" 
+                  elif . == "duplicated_lines_density" then "🧬 Duplicated Lines (%)" 
+                  elif . == "reliability_rating" then "📊 Reliability Rating" 
+                  elif . == "security_rating" then "🔒 Security Rating" 
+                  elif . == "sqale_rating" then "⚙️ Maintainability Rating" 
                   else . 
                 end): \(.value)"' sonar_metrics.json >> sonar_comment.md
           else
