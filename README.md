@@ -15,6 +15,109 @@ The page will reload when you make changes.\
 You may also see any lint errors in the console.
 sgfsadgnjkasnkljdgnkjlasegnfkaskngfklsngLKNLSLKNFKLASNklvnasgNKAKLSENGKLASD
 ### `npm test`
+name: SonarQube PR Analysis (Community Edition)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  sonar-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm test -- --coverage
+        continue-on-error: true
+
+      - name: Run SonarQube scanner (Community Edition Safe)
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          npx sonar-scanner \
+            -Dsonar.projectKey=myreactproject \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+      - name: Wait for SonarQube analysis to complete
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          echo "Waiting for SonarQube analysis to complete..."
+          COMPONENT_KEY="myreactproject"
+          ATTEMPTS=0
+          MAX_ATTEMPTS=10
+          SLEEP_SECONDS=10
+
+          TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${COMPONENT_KEY}" | jq -r '.current.id')
+
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+              "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" | jq -r '.task.status')
+
+            echo "SonarQube task status: $STATUS"
+
+            if [ "$STATUS" = "SUCCESS" ]; then
+              break
+            elif [ "$STATUS" = "FAILED" ]; then
+              echo "SonarQube analysis failed."
+              exit 1
+            fi
+
+            sleep $SLEEP_SECONDS
+            ATTEMPTS=$((ATTEMPTS+1))
+          done
+
+      - name: Fetch metrics from SonarQube
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
+            -o sonar_metrics.json
+
+          echo "### 📊 SonarQube Quality Report" > sonar_comment.md
+          echo "**Project:** \`myreactproject\`" >> sonar_comment.md
+          echo "" >> sonar_comment.md
+
+          if jq -e '.component.measures' sonar_metrics.json > /dev/null; then
+            jq -r '.component.measures[] | 
+              "- \(.metric | 
+                  if . == \"bugs\" then \"🐞 Bugs\" 
+                  elif . == \"vulnerabilities\" then \"🔐 Vulnerabilities\" 
+                  elif . == \"code_smells\" then \"💨 Code Smells\" 
+                  elif . == \"coverage\" then \"📈 Coverage\" 
+                  elif . == \"duplicated_lines_density\" then \"🧬 Duplicated Lines (%)\" 
+                  elif . == \"reliability_rating\" then \"📊 Reliability Rating\" 
+                  elif . == \"security_rating\" then \"🔒 Security Rating\" 
+                  elif . == \"sqale_rating\" then \"⚙️ Maintainability Rating\" 
+                  else . 
+                end): \(.value)"' sonar_metrics.json >> sonar_comment.md
+          else
+            echo "⚠️ Could not retrieve metrics. Check project key/token or SonarQube availability." >> sonar_comment.md
+          fi
+ewsfsadfrdeasedfdesfddesd
+      - name: Comment on Pull Request with SonarQube Results
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: sonar_comment.md
 
 Launches the test runner in the interactive watch mode.\
 See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
