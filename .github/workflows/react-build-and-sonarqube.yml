@@ -1,4 +1,4 @@
-name: SonarQube PR Analysis
+name: SonarQube PR Analysis (Community Edition)
 
 on:
   pull_request:
@@ -25,7 +25,7 @@ jobs:
         run: npm test -- --coverage
         continue-on-error: true
 
-      - name: Run SonarQube scanner
+      - name: Run SonarQube scanner (Community Edition Safe)
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -34,10 +34,7 @@ jobs:
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
-            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
-            -Dsonar.pullrequest.base=${{ github.base_ref }}
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
       - name: Wait for SonarQube analysis to complete
         env:
@@ -70,11 +67,9 @@ jobs:
           done
 
       - name: Fetch metrics from SonarQube
-        id: fetch_metrics
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          echo "Fetching metrics from SonarQube..."
           curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=myreactproject&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,reliability_rating,security_rating,sqale_rating" \
             -o sonar_metrics.json
