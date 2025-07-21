@@ -1,4 +1,4 @@
-name: SonarQube Analysis (Community Edition, No Raw Metrics Print)
+name: SonarQube Analysis (Community Edition, Debug)
 
 on:
   pull_request:
@@ -25,7 +25,7 @@ jobs:
         run: npm test -- --coverage
         continue-on-error: true
 
-      - name: Run SonarQube Scanner (no PR params)
+      - name: Run SonarQube Scanner (verbose)
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -34,36 +34,55 @@ jobs:
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+            -X
 
-      - name: Wait for SonarQube analysis to complete
+      - name: Sleep 15 seconds to allow SonarQube to register analysis task
+        run: sleep 15
+
+      - name: Fetch SonarQube analysis task ID with debug info
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           COMPONENT_KEY="newtest"
-          ATTEMPTS=0
-          MAX_ATTEMPTS=15
-          SLEEP_SECONDS=10
 
-          TASK_ID=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
-            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${COMPONENT_KEY}" | jq -r '.current.id')
+          echo "Fetching current task for component $COMPONENT_KEY..."
 
-          echo "SonarQube task id: $TASK_ID"
+          curl -s -u "${SONAR_TOKEN}:" \
+            "${{ secrets.SONAR_HOST_URL }}/api/ce/component?component=${COMPONENT_KEY}" | tee response.json
 
-          if [ "$TASK_ID" = "null" ]; then
-            echo "❌ No current SonarQube task found for component $COMPONENT_KEY"
-            exit 1
+          TASK_ID=$(jq -r '.current.id' response.json)
+          echo "Task ID from current task API: $TASK_ID"
+
+          if [ "$TASK_ID" = "null" ] || [ -z "$TASK_ID" ]; then
+            echo "No current task found, trying recent tasks API..."
+
+            curl -s -u "${SONAR_TOKEN}:" \
+              "${{ secrets.SONAR_HOST_URL }}/api/ce/activity?component=${COMPONENT_KEY}&max=5" | tee recent_tasks.json
+
+            TASK_ID=$(jq -r '.tasks[0].id' recent_tasks.json)
+            echo "Task ID from recent tasks API: $TASK_ID"
+
+            if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "null" ]; then
+              echo "❌ No analysis tasks found for component $COMPONENT_KEY"
+              exit 1
+            fi
           fi
 
+          # Wait for analysis to complete
+          ATTEMPTS=0
+          MAX_ATTEMPTS=20
+          SLEEP_SECONDS=10
+
           while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-            STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            STATUS=$(curl -s -u "${SONAR_TOKEN}:" \
               "${{ secrets.SONAR_HOST_URL }}/api/ce/task?id=${TASK_ID}" | jq -r '.task.status')
 
             echo "SonarQube task status: $STATUS"
 
             if [ "$STATUS" = "SUCCESS" ]; then
               echo "✅ SonarQube analysis completed successfully"
-              break
+              exit 0
             elif [ "$STATUS" = "FAILED" ]; then
               echo "❌ SonarQube analysis failed"
               exit 1
@@ -73,20 +92,18 @@ jobs:
             ATTEMPTS=$((ATTEMPTS+1))
           done
 
-          if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
-            echo "❌ Timed out waiting for SonarQube analysis"
-            exit 1
-          fi
+          echo "❌ Timed out waiting for SonarQube analysis"
+          exit 1
 
-      - name: Fetch SonarQube metrics (no raw print)
+      - name: Fetch SonarQube metrics quietly
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+          curl -s -u "${SONAR_TOKEN}:" \
             "${{ secrets.SONAR_HOST_URL }}/api/measures/component?component=newtest&metricKeys=bugs,vulnerabilities,code_smells,coverage" \
             -o sonar_metrics.json
 
-      - name: Create comment body
+      - name: Create PR comment body
         run: |
           echo "### 📊 SonarQube Quality Report for \`newtest\`" > sonar_comment.md
 
